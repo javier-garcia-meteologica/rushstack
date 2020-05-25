@@ -265,24 +265,57 @@ export class DtsRollupGenerator {
         break;
 
       case ts.SyntaxKind.Identifier:
-        const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForIdentifierNode(
-          span.node as ts.Identifier
-        );
+        {
+          const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForNode(
+            span.node as ts.Identifier
+          );
 
-        if (referencedEntity) {
-          if (!referencedEntity.nameForEmit) {
-            // This should never happen
-            throw new InternalError('referencedEntry.nameForEmit is undefined');
+          if (referencedEntity) {
+            if (!referencedEntity.nameForEmit) {
+              // This should never happen
+              throw new InternalError('referencedEntry.nameForEmit is undefined');
+            }
+
+            span.modification.prefix = referencedEntity.nameForEmit;
+            // For debugging:
+            // span.modification.prefix += '/*R=FIX*/';
+          } else {
+            // For debugging:
+            // span.modification.prefix += '/*R=KEEP*/';
           }
-
-          span.modification.prefix = referencedEntity.nameForEmit;
-          // For debugging:
-          // span.modification.prefix += '/*R=FIX*/';
-        } else {
-          // For debugging:
-          // span.modification.prefix += '/*R=KEEP*/';
         }
+        break;
 
+      case ts.SyntaxKind.ImportType:
+        {
+          const node: ts.ImportTypeNode = span.node as ts.ImportTypeNode;
+          const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForNode(node);
+
+          if (referencedEntity) {
+            if (!referencedEntity.nameForEmit) {
+              // This should never happen
+              throw new InternalError('referencedEntry.nameForEmit is undefined');
+            }
+
+            if (referencedEntity.astEntity instanceof AstSymbol) {
+              // Replace with internal symbol
+
+              span.modification.skipAll();
+              span.modification.prefix = referencedEntity.nameForEmit;
+            } else {
+              // External ImportType nodes are associated with a StarImport
+              // Replace node with nameForEmit and recover imported names from node qualifier
+
+              const qualifier: string = node.qualifier ? node.qualifier.getText() : '';
+              const replacement: string = qualifier
+                ? `${referencedEntity.nameForEmit}.${qualifier}`
+                : referencedEntity.nameForEmit;
+
+              span.modification.skipAll();
+              span.modification.prefix = replacement;
+            }
+          }
+        }
         break;
     }
 

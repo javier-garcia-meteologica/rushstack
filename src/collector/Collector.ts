@@ -271,8 +271,8 @@ export class Collector {
    * @remarks
    * Throws an Error if the ts.Identifier is not part of node tree that was analyzed.
    */
-  public tryGetEntityForIdentifierNode(identifier: ts.Identifier): CollectorEntity | undefined {
-    const astEntity: AstEntity | undefined = this.astSymbolTable.tryGetEntityForIdentifierNode(identifier);
+  public tryGetEntityForNode(identifier: ts.Identifier | ts.ImportTypeNode): CollectorEntity | undefined {
+    const astEntity: AstEntity | undefined = this.astSymbolTable.tryGetEntityForNode(identifier);
     if (astEntity) {
       return this._entitiesByAstEntity.get(astEntity);
     }
