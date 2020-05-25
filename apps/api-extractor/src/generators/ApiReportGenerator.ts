@@ -255,7 +255,7 @@ export class ApiReportGenerator {
         break;
 
       case ts.SyntaxKind.Identifier:
-        const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForIdentifierNode(
+        const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForNode(
           span.node as ts.Identifier
         );
 

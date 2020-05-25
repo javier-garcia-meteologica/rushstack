@@ -26,7 +26,13 @@ export enum AstImportKind {
   /**
    * An import statement such as `import x = require("y");`.
    */
-  EqualsImport
+  EqualsImport,
+
+  /**
+   * An import node such as `const foo: import("y").a.b = 'bar';`.
+   * Not to confuse with dynamic imports.
+   */
+  ImportType
 }
 
 /**
@@ -78,6 +84,9 @@ export class AstImport {
    *
    * // For AstImportKind.EqualsImport style, exportName would be "x" in this example:
    * import x = require("y");
+   *
+   * // For AstImportKind.EqualsImport style, exportName would be "a.b" in this example:
+   * const foo: import("y").a.b = 'bar';
    * ```
    */
   public readonly exportName: string;
@@ -126,6 +135,8 @@ export class AstImport {
         return `${options.modulePath}:*`;
       case AstImportKind.EqualsImport:
         return `${options.modulePath}:=`;
+      case AstImportKind.ImportType:
+        return `${options.modulePath}:T:${options.exportName}`;
       default:
         throw new InternalError('Unknown AstImportKind');
     }

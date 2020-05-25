@@ -247,24 +247,43 @@ export class DtsRollupGenerator {
         break;
 
       case ts.SyntaxKind.Identifier:
-        const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForIdentifierNode(
-          span.node as ts.Identifier
-        );
+        {
+          const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForNode(
+            span.node as ts.Identifier
+          );
 
-        if (referencedEntity) {
-          if (!referencedEntity.nameForEmit) {
-            // This should never happen
-            throw new InternalError('referencedEntry.nameForEmit is undefined');
+          if (referencedEntity) {
+            if (!referencedEntity.nameForEmit) {
+              // This should never happen
+              throw new InternalError('referencedEntry.nameForEmit is undefined');
+            }
+
+            span.modification.prefix = referencedEntity.nameForEmit;
+            // For debugging:
+            // span.modification.prefix += '/*R=FIX*/';
+          } else {
+            // For debugging:
+            // span.modification.prefix += '/*R=KEEP*/';
           }
-
-          span.modification.prefix = referencedEntity.nameForEmit;
-          // For debugging:
-          // span.modification.prefix += '/*R=FIX*/';
-        } else {
-          // For debugging:
-          // span.modification.prefix += '/*R=KEEP*/';
         }
+        break;
 
+      case ts.SyntaxKind.ImportType:
+        {
+          const node = span.node as ts.ImportTypeNode;
+          const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForNode(node);
+
+          // Leave external imports, only replace internal symbols
+          if (referencedEntity && referencedEntity.astEntity instanceof AstSymbol) {
+            if (!referencedEntity.nameForEmit) {
+              // This should never happen
+              throw new InternalError('referencedEntry.nameForEmit is undefined');
+            }
+
+            span.modification.skipAll();
+            span.modification.prefix = referencedEntity.nameForEmit;
+          }
+        }
         break;
     }
 

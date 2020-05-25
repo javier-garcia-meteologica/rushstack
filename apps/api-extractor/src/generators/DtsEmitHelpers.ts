@@ -37,6 +37,13 @@ export class DtsEmitHelpers {
       case AstImportKind.EqualsImport:
         stringWriter.writeLine(`import ${collectorEntity.nameForEmit} = require('${astImport.modulePath}');`);
         break;
+      case AstImportKind.ImportType:
+        {
+          const qualifier = astImport.exportName && astImport.exportName.length
+            ? `.${astImport.exportName}` : '';
+          stringWriter.writeLine(`type ${collectorEntity.nameForEmit} = import('${astImport.modulePath}')${qualifier};`);
+        }
+        break;
       default:
         throw new InternalError('Unimplemented AstImportKind');
     }
