@@ -373,6 +373,43 @@ export class ExportAnalyzer {
     return astSymbol;
   }
 
+  public fetchReferencedAstEntityFromImportTypeNode(node: ts.ImportTypeNode, referringModuleIsExternal: boolean): AstEntity | undefined {
+    const externalModulePath: string | undefined = this._tryGetExternalModulePath(node);
+
+    // Internal reference: AstSymbol 
+    const rightMostToken = node.qualifier
+      ? node.qualifier.kind === ts.SyntaxKind.QualifiedName
+        ? node.qualifier.right
+        : node.qualifier
+      : node;
+
+    // There is no symbol property in a ImportTypeNode, obtain the associated export symbol
+    const exportSymbol: ts.Symbol | undefined = this._typeChecker.getSymbolAtLocation(rightMostToken);
+    if (!exportSymbol) {
+      throw new Error('Symbol not found for identifier: ' + node.getText());
+    }
+
+    if (externalModulePath) {
+      // External reference: AstImport
+      return this._fetchAstImport(exportSymbol, {
+        importKind: AstImportKind.ImportType,
+        exportName: node.qualifier ? node.qualifier.getText() : '',
+        modulePath: externalModulePath
+      });
+    }
+
+    const followedSymbol: ts.Symbol = TypeScriptHelpers.followAliases(exportSymbol, this._typeChecker);
+
+    const astSymbol: AstSymbol | undefined = this._astSymbolTable.fetchAstSymbol({
+      followedSymbol: followedSymbol,
+      isExternal: referringModuleIsExternal,
+      includeNominalAnalysis: false,
+      addIfMissing: true
+    });
+
+    return astSymbol;
+  }
+
   private _tryMatchExportDeclaration(declaration: ts.Declaration, declarationSymbol: ts.Symbol): AstEntity | undefined {
     const exportDeclaration: ts.ExportDeclaration | undefined
       = TypeScriptHelpers.findFirstParent<ts.ExportDeclaration>(declaration, ts.SyntaxKind.ExportDeclaration);
@@ -562,13 +599,6 @@ export class ExportAnalyzer {
       }
     }
 
-    const importTypeNode: ts.Node | undefined
-      = TypeScriptHelpers.findFirstChildNode(declaration, ts.SyntaxKind.ImportType);
-    if (importTypeNode) {
-      throw new Error('The expression contains an import() type, which is not yet supported by API Extractor:\n'
-        + SourceFileLocationFormatter.formatDeclaration(importTypeNode));
-    }
-
     return undefined;
   }
 
@@ -652,8 +682,8 @@ export class ExportAnalyzer {
     return undefined;
   }
 
-  private _tryGetExternalModulePath(importOrExportDeclaration: ts.ImportDeclaration | ts.ExportDeclaration,
-    exportSymbol: ts.Symbol): string | undefined {
+  private _tryGetExternalModulePath(importOrExportDeclaration: ts.ImportDeclaration | ts.ExportDeclaration | ts.ImportTypeNode,
+    exportSymbol?: ts.Symbol): string | undefined {
 
       // The name of the module, which could be like "./SomeLocalFile' or like 'external-package/entry/point'
     const moduleSpecifier: string | undefined = TypeScriptHelpers.getModuleSpecifier(importOrExportDeclaration);
@@ -732,5 +762,22 @@ export class ExportAnalyzer {
     }
 
     return astImport;
+  }
+
+  public findPreferredImportAlternative(astImport: AstImport): AstImport | undefined {
+    const { importKind, modulePath, exportName } = astImport;
+
+    switch (importKind) {
+      case AstImportKind.ImportType: {
+        const preferredAlternativeKind = exportName ? AstImportKind.NamedImport : AstImportKind.StarImport;
+        const preferredAlternativeKey = AstImport.getKey({
+          importKind: preferredAlternativeKind,
+          modulePath,
+          exportName
+        });
+
+        return this._astImportsByKey.get(preferredAlternativeKey);
+      }
+    }
   }
 }

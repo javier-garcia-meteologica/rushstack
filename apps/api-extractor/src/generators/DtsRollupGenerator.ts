@@ -93,7 +93,7 @@ export class DtsRollupGenerator {
         const maxEffectiveReleaseTag: ReleaseTag = symbolMetadata
           ? symbolMetadata.maxEffectiveReleaseTag : ReleaseTag.None;
 
-        if (this._shouldIncludeReleaseTag(maxEffectiveReleaseTag, dtsKind)) {
+        if (this._shouldIncludeReleaseTag(maxEffectiveReleaseTag, dtsKind) && !entity.preferredAlternative) {
           DtsEmitHelpers.emitImport(stringWriter, entity, astImport);
         }
       }
@@ -247,24 +247,60 @@ export class DtsRollupGenerator {
         break;
 
       case ts.SyntaxKind.Identifier:
-        const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForIdentifierNode(
-          span.node as ts.Identifier
-        );
+        {
+          const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForNode(
+            span.node as ts.Identifier
+          );
 
-        if (referencedEntity) {
-          if (!referencedEntity.nameForEmit) {
-            // This should never happen
-            throw new InternalError('referencedEntry.nameForEmit is undefined');
+          if (referencedEntity) {
+            if (!referencedEntity.nameForEmit) {
+              // This should never happen
+              throw new InternalError('referencedEntry.nameForEmit is undefined');
+            }
+
+            span.modification.prefix = referencedEntity.nameForEmit;
+            // For debugging:
+            // span.modification.prefix += '/*R=FIX*/';
+          } else {
+            // For debugging:
+            // span.modification.prefix += '/*R=KEEP*/';
           }
-
-          span.modification.prefix = referencedEntity.nameForEmit;
-          // For debugging:
-          // span.modification.prefix += '/*R=FIX*/';
-        } else {
-          // For debugging:
-          // span.modification.prefix += '/*R=KEEP*/';
         }
+        break;
 
+      case ts.SyntaxKind.ImportType:
+        {
+          const node = span.node as ts.ImportTypeNode;
+          const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForNode(node);
+
+          if (referencedEntity) {
+            if (referencedEntity.astEntity instanceof AstSymbol) {
+              // Replace internal symbols
+
+              if (!referencedEntity.nameForEmit) {
+                // This should never happen
+                throw new InternalError('referencedEntry.nameForEmit is undefined');
+              }
+
+              span.modification.skipAll();
+              span.modification.prefix = referencedEntity.nameForEmit;
+            } else {
+              // Replace external imports if there is a better alternative
+
+              const alternative = referencedEntity.preferredAlternative;
+
+              if (alternative) {
+                if (!alternative.nameForEmit) {
+                  // This should never happen
+                  throw new InternalError('referencedEntry.nameForEmit is undefined');
+                }
+
+                span.modification.skipAll();
+                span.modification.prefix = alternative.nameForEmit;
+              }
+            }
+          }
+        }
         break;
     }
 

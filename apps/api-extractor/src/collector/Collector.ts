@@ -19,6 +19,7 @@ import { CollectorEntity } from './CollectorEntity';
 import { AstSymbolTable, AstEntity } from '../analyzer/AstSymbolTable';
 import { AstModule, AstModuleExportInfo } from '../analyzer/AstModule';
 import { AstSymbol } from '../analyzer/AstSymbol';
+import { AstImport } from '../analyzer/AstImport';
 import { AstDeclaration } from '../analyzer/AstDeclaration';
 import { TypeScriptHelpers } from '../analyzer/TypeScriptHelpers';
 import { WorkingPackage } from './WorkingPackage';
@@ -249,6 +250,7 @@ export class Collector {
     Sort.sortSet(this._dtsTypeReferenceDirectives);
     Sort.sortSet(this._dtsLibReferenceDirectives);
     this._starExportedExternalModulePaths.sort();
+    this._linkPreferredImportAlternatives();
   }
 
   /**
@@ -257,8 +259,8 @@ export class Collector {
    * @remarks
    * Throws an Error if the ts.Identifier is not part of node tree that was analyzed.
    */
-  public tryGetEntityForIdentifierNode(identifier: ts.Identifier): CollectorEntity | undefined {
-    const astEntity: AstEntity | undefined = this.astSymbolTable.tryGetEntityForIdentifierNode(identifier);
+  public tryGetEntityForNode(identifier: ts.Identifier | ts.ImportTypeNode): CollectorEntity | undefined {
+    const astEntity: AstEntity | undefined = this.astSymbolTable.tryGetEntityForNode(identifier);
     if (astEntity) {
       return this._entitiesByAstEntity.get(astEntity);
     }
@@ -829,6 +831,56 @@ export class Collector {
 
         }
       }
+    }
+  }
+
+  private _findPreferredImportAlternative(collectorEntity: CollectorEntity): CollectorEntity | undefined {
+    if (!(collectorEntity.astEntity instanceof AstImport)) return undefined;
+
+    const alternativeAstImport = this.astSymbolTable.findPreferredImportAlternative(collectorEntity.astEntity);
+
+    if (alternativeAstImport) {
+      return this._entitiesByAstEntity.get(alternativeAstImport);
+    }
+  }
+
+  public _linkPreferredImportAlternatives () {
+    const importEntities: CollectorEntity[] = [];
+
+    // Find preferred alternatives for each import entity
+    for (const collectorEntity of this._entities) {
+      if (collectorEntity.astEntity instanceof AstImport) {
+        importEntities.push();
+        const preferredAlternative = this._findPreferredImportAlternative(collectorEntity);
+        if (preferredAlternative) {
+          collectorEntity.preferredAlternative = preferredAlternative;
+        }
+      }
+    }
+
+    // Resolve chains of preferred alternatives
+    // Example: astImport.preferredAlternative.preferredAlternative.preferredAlternative
+    const totalNumberOfImports = importEntities.length;
+
+    for (const importEntity of importEntities) {
+      if (!importEntity.preferredAlternative) continue;
+
+      let lastPreferredAlternative: CollectorEntity = importEntity.preferredAlternative;
+      for (let i = 0;; i++) {
+        // Circular references can be introduced at any point in the preferredAlternative chain,
+        // and the length of the circle can be as large as the total number of astImports.
+        if (i >= totalNumberOfImports) {
+          throw new Error('Circular references');
+        }
+
+        if (lastPreferredAlternative.preferredAlternative) {
+          lastPreferredAlternative = lastPreferredAlternative.preferredAlternative;
+        } else {
+          break;
+        }
+      }
+
+      importEntity.preferredAlternative = lastPreferredAlternative;
     }
   }
 }

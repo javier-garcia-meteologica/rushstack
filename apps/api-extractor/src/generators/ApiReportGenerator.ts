@@ -50,7 +50,7 @@ export class ApiReportGenerator {
     // Emit the imports
     let importsEmitted: boolean = false;
     for (const entity of collector.entities) {
-      if (entity.astEntity instanceof AstImport) {
+      if (entity.astEntity instanceof AstImport && !entity.preferredAlternative) {
         DtsEmitHelpers.emitImport(stringWriter, entity, entity.astEntity);
         importsEmitted = true;
       }
@@ -255,7 +255,7 @@ export class ApiReportGenerator {
         break;
 
       case ts.SyntaxKind.Identifier:
-        const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForIdentifierNode(
+        const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForNode(
           span.node as ts.Identifier
         );
 

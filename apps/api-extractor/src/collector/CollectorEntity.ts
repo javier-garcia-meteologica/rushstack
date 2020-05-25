@@ -23,6 +23,13 @@ export class CollectorEntity {
    */
   public readonly astEntity: AstEntity;
 
+  /**
+   * If preferredAlternative links to another AstImport to be used instead of this one.
+   *
+   * Example: "@rushstack/node-core-library/lib/FileSystem:FileSystem"
+   */
+  public preferredAlternative?: CollectorEntity;
+
   private _exportNames: Set<string> = new Set<string>();
   private _exportNamesSorted: boolean = false;
   private _singleExportName: string | undefined = undefined;
