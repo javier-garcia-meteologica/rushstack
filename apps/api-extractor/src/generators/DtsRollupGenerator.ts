@@ -10,14 +10,14 @@ import { ReleaseTag } from '@microsoft/api-extractor-model';
 import { Collector } from '../collector/Collector';
 import { TypeScriptHelpers } from '../analyzer/TypeScriptHelpers';
 import { Span, SpanModification } from '../analyzer/Span';
-import { AstImport, AstImportKind } from '../analyzer/AstImport';
+import { AstImport } from '../analyzer/AstImport';
 import { CollectorEntity } from '../collector/CollectorEntity';
 import { AstDeclaration } from '../analyzer/AstDeclaration';
 import { ApiItemMetadata } from '../collector/ApiItemMetadata';
 import { AstSymbol } from '../analyzer/AstSymbol';
 import { SymbolMetadata } from '../collector/SymbolMetadata';
 import { StringWriter } from './StringWriter';
-import { DtsEmitHelpers } from './DtsEmitHelpers';
+import { DtsHelpers, ModifyNestedSpan } from './DtsHelpers';
 import { DeclarationMetadata } from '../collector/DeclarationMetadata';
 
 /**
@@ -100,7 +100,7 @@ export class DtsRollupGenerator {
           : ReleaseTag.None;
 
         if (this._shouldIncludeReleaseTag(maxEffectiveReleaseTag, dtsKind)) {
-          DtsEmitHelpers.emitImport(stringWriter, entity, astImport);
+          DtsHelpers.emitImport(stringWriter, entity, astImport);
         }
       }
     }
@@ -146,12 +146,12 @@ export class DtsRollupGenerator {
 
       if (!entity.shouldInlineExport) {
         for (const exportName of entity.exportNames) {
-          DtsEmitHelpers.emitNamedExport(stringWriter, exportName, entity);
+          DtsHelpers.emitNamedExport(stringWriter, exportName, entity);
         }
       }
     }
 
-    DtsEmitHelpers.emitStarExports(stringWriter, collector);
+    DtsHelpers.emitStarExports(stringWriter, collector);
 
     // Emit "export { }" which is a special directive that prevents consumers from importing declarations
     // that don't have an explicit "export" modifier.
@@ -288,76 +288,14 @@ export class DtsRollupGenerator {
 
       case ts.SyntaxKind.ImportType:
         {
-          const node: ts.ImportTypeNode = span.node as ts.ImportTypeNode;
-          const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForNode(node);
+          const modifyNestedSpan: ModifyNestedSpan = (
+            childSpan: Span,
+            childAstDeclaration: AstDeclaration
+          ) => {
+            DtsRollupGenerator._modifySpan(collector, childSpan, entity, childAstDeclaration, dtsKind);
+          };
 
-          if (referencedEntity) {
-            if (!referencedEntity.nameForEmit) {
-              // This should never happen
-              throw new InternalError('referencedEntry.nameForEmit is undefined');
-            }
-
-            let typeArgumentsText: string = '';
-
-            if (node.typeArguments && node.typeArguments.length > 0) {
-              // Type arguments have to be processed and written to the document
-              const lessThanTokenPos: number = span.children.findIndex(
-                (childSpan) => childSpan.node.kind === ts.SyntaxKind.LessThanToken
-              );
-              const greaterThanTokenPos: number = span.children.findIndex(
-                (childSpan) => childSpan.node.kind === ts.SyntaxKind.GreaterThanToken
-              );
-
-              if (lessThanTokenPos < 0 || greaterThanTokenPos <= lessThanTokenPos) {
-                throw new InternalError('Invalid type arguments:\n' + node.getText());
-              }
-
-              const typeArgumentsSpans: Span[] = span.children.slice(
-                lessThanTokenPos + 1,
-                greaterThanTokenPos
-              );
-
-              // Apply modifications to Span elements of typeArguments
-              typeArgumentsSpans.forEach((childSpan) => {
-                const childAstDeclaration: AstDeclaration = AstDeclaration.isSupportedSyntaxKind(
-                  childSpan.kind
-                )
-                  ? collector.astSymbolTable.getChildAstDeclarationByNode(childSpan.node, astDeclaration)
-                  : astDeclaration;
-
-                DtsRollupGenerator._modifySpan(collector, childSpan, entity, childAstDeclaration, dtsKind);
-              });
-
-              const typeArgumentsStrings: string[] = typeArgumentsSpans.map((childSpan) =>
-                childSpan.getModifiedText()
-              );
-              typeArgumentsText = `<${typeArgumentsStrings.join(', ')}>`;
-            }
-
-            if (
-              referencedEntity.astEntity instanceof AstImport &&
-              referencedEntity.astEntity.importKind === AstImportKind.ImportType &&
-              referencedEntity.astEntity.exportName
-            ) {
-              // For an ImportType with a namespace chain, only the top namespace is imported.
-              // Must add the original nested qualifiers to the rolled up import.
-              const qualifiersText: string = node.qualifier?.getText() ?? '';
-              const nestedQualifiersStart: number = qualifiersText.indexOf('.');
-              // Including the leading "."
-              const nestedQualifiersText: string =
-                nestedQualifiersStart >= 0 ? qualifiersText.substring(nestedQualifiersStart) : '';
-
-              const replacement: string = `${referencedEntity.nameForEmit}${nestedQualifiersText}${typeArgumentsText}`;
-
-              span.modification.skipAll();
-              span.modification.prefix = replacement;
-            } else {
-              // Replace with internal symbol or AstImport
-
-              span.modification.skipAll();
-              span.modification.prefix = `${referencedEntity.nameForEmit}${typeArgumentsText}`;
-            }
-          }
+          DtsHelpers.modifyImportTypeSpan(collector, span, astDeclaration, modifyNestedSpan);
         }
         break;
     }

@@ -8,11 +8,15 @@ import { CollectorEntity } from '../collector/CollectorEntity';
 import { AstImport, AstImportKind } from '../analyzer/AstImport';
 import { StringWriter } from './StringWriter';
 import { Collector } from '../collector/Collector';
+import { Span } from '../analyzer/Span';
+import { AstDeclaration } from '../analyzer/AstDeclaration';
+
+export type ModifyNestedSpan = (childSpan: Span, childAstDeclaration: AstDeclaration) => void;
 
 /**
  * Some common code shared between DtsRollupGenerator and ApiReportGenerator.
  */
-export class DtsEmitHelpers {
+export class DtsHelpers {
   public static emitImport(
     stringWriter: StringWriter,
     collectorEntity: CollectorEntity,
@@ -86,6 +90,94 @@ export class DtsEmitHelpers {
       stringWriter.writeLine();
       for (const starExportedExternalModulePath of collector.starExportedExternalModulePaths) {
         stringWriter.writeLine(`export * from "${starExportedExternalModulePath}";`);
+      }
+    }
+  }
+
+  public static modifySpanTypeArgumentsAndGetText(
+    span: Span,
+    astDeclaration: AstDeclaration,
+    collector: Collector,
+    modifyNestedSpan: ModifyNestedSpan
+  ): string {
+    const node: ts.NodeWithTypeArguments = span.node as ts.NodeWithTypeArguments;
+
+    if (!node.typeArguments || node.typeArguments.length <= 0) {
+      return '';
+    }
+
+    // Type arguments have to be processed and written to the document
+    const lessThanTokenPos: number = span.children.findIndex(
+      (childSpan) => childSpan.node.kind === ts.SyntaxKind.LessThanToken
+    );
+    const greaterThanTokenPos: number = span.children.findIndex(
+      (childSpan) => childSpan.node.kind === ts.SyntaxKind.GreaterThanToken
+    );
+
+    if (lessThanTokenPos < 0 || greaterThanTokenPos <= lessThanTokenPos) {
+      throw new InternalError('Invalid type arguments:\n' + node.getText());
+    }
+
+    const typeArgumentsSpans: Span[] = span.children.slice(lessThanTokenPos + 1, greaterThanTokenPos);
+
+    // Apply modifications to Span elements of typeArguments
+    typeArgumentsSpans.forEach((childSpan) => {
+      const childAstDeclaration: AstDeclaration = AstDeclaration.isSupportedSyntaxKind(childSpan.kind)
+        ? collector.astSymbolTable.getChildAstDeclarationByNode(childSpan.node, astDeclaration)
+        : astDeclaration;
+
+      modifyNestedSpan(childSpan, childAstDeclaration);
+    });
+
+    const typeArgumentsStrings: string[] = typeArgumentsSpans.map((childSpan) => childSpan.getModifiedText());
+
+    return `<${typeArgumentsStrings.join(', ')}>`;
+  }
+
+  public static modifyImportTypeSpan(
+    collector: Collector,
+    span: Span,
+    astDeclaration: AstDeclaration,
+    modifyNestedSpan: ModifyNestedSpan
+  ): void {
+    const node: ts.ImportTypeNode = span.node as ts.ImportTypeNode;
+    const referencedEntity: CollectorEntity | undefined = collector.tryGetEntityForNode(node);
+
+    if (referencedEntity) {
+      if (!referencedEntity.nameForEmit) {
+        // This should never happen
+        throw new InternalError('referencedEntry.nameForEmit is undefined');
+      }
+
+      const typeArgumentsText: string = DtsHelpers.modifySpanTypeArgumentsAndGetText(
+        span,
+        astDeclaration,
+        collector,
+        modifyNestedSpan
+      );
+
+      if (
+        referencedEntity.astEntity instanceof AstImport &&
+        referencedEntity.astEntity.importKind === AstImportKind.ImportType &&
+        referencedEntity.astEntity.exportName
+      ) {
+        // For an ImportType with a namespace chain, only the top namespace is imported.
+        // Must add the original nested qualifiers to the rolled up import.
+        const qualifiersText: string = node.qualifier?.getText() ?? '';
+        const nestedQualifiersStart: number = qualifiersText.indexOf('.');
+        // Including the leading "."
+        const nestedQualifiersText: string =
+          nestedQualifiersStart >= 0 ? qualifiersText.substring(nestedQualifiersStart) : '';
+
+        const replacement: string = `${referencedEntity.nameForEmit}${nestedQualifiersText}${typeArgumentsText}`;
+
+        span.modification.skipAll();
+        span.modification.prefix = replacement;
+      } else {
+        // Replace with internal symbol or AstImport
+
+        span.modification.skipAll();
+        span.modification.prefix = `${referencedEntity.nameForEmit}${typeArgumentsText}`;
       }
     }
   }
